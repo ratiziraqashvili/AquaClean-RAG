@@ -3,12 +3,17 @@ from brain import get_ai_answer
 import requests
 import os
 import json
+import time
 
 app = FastAPI()
 processed_messages = set()  # To track processed message IDs and avoid duplicates
 
+paused_users = {}
+PAUSE_DURATION = 1800 # 30 minutes in seconds
+
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+APP_ID = os.getenv("APP_ID")
 
 def send_fb_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v21.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
@@ -61,28 +66,50 @@ async def handle_messages(request: Request):
                     continue
 
                 if "message" in messaging_event:
-                    user_text = messaging_event["message"]["text"]
+                    message_data = messaging_event["message"]
                     sender_id = messaging_event["sender"]["id"]
+                    recipient_id = messaging_event["recipient"]["id"]
 
-                    print(f"--- Debug: Raw sender_id: '{sender_id}' ---")
-                    print(f"--- Debug: Full messaging_event: {messaging_event} ---")
-
-                    processed_messages.add(msg_id)
-
-                    if len(processed_messages) > 1000:
-                        processed_messages.pop()  # Remove the oldest message ID to prevent memory bloat
+                    if msg_id:
+                        processed_messages.add(msg_id)
+                        if len(processed_messages) > 1000:
+                            processed_messages.pop()  # Remove the oldest message ID to prevent memory bloat
                     
+                    if message_data.get("is_echo"):
+                        target_user_id = recipient_id
+                        echo_app_id = message_data.get("app_id")
+                        admin_text = message_data.get("text", "")
+
+                        if admin_text.strip().lower() == "/resume":
+                            if target_user_id in paused_users:
+                                del paused_users[target_user_id]
+                                print(f"Resumed messages for user: {target_user_id}")
+
+                        elif str(echo_app_id) != str(APP_ID):
+                            paused_users[target_user_id] = time.time()
+                            print(f"--- Human admin intervened. Pausing bot for user {target_user_id} ---")
+
+                        continue
+
+                    user_text = message_data.get("text", "")
+
+                    if sender_id in paused_users:
+                        time_since_pause = time.time() - paused_users[sender_id]
+                        if time_since_pause < PAUSE_DURATION:
+                            print(f"--- Bot is paused for user {sender_id}. Time since pause: {time_since_pause:.2f} seconds ---")
+                            continue
+                        else:
+                            del paused_users[sender_id]
+                            print(f"--- Pause expired. Resuming bot for user {sender_id} ---")
+
                     try:
-                        # 1. AI starts thinking
                         print(f"User sent: {user_text}")
                         ai_response = get_ai_answer(user_text)
                     except Exception as e:
                         print(f"AI Error: {e}")
                         ai_response = "ბოდიში, ამჟამად ტექნიკური პრობლემაა. გთხოვთ, მოგვიანებით სცადოთ."
-
-                    # 2. AI sends the answer back to the user
+                    
                     send_fb_message(sender_id, ai_response)
                     print(f"Sent AI response to {sender_id} : {ai_response}")
-                    
 
     return {"status": "success"}
