@@ -3,12 +3,17 @@ from brain import get_ai_answer
 import requests
 import os
 import json
+import time
 
 app = FastAPI()
+
 processed_messages = set()  # To track processed message IDs and avoid duplicates
+paused_users = {}  # To track users for whom the bot is paused
+PAUSE_DURATION = 30 * 60  # 30 Min in seconds
 
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+EMAIL = os.getenv("EMAIL")
 
 def send_fb_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v21.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
@@ -20,9 +25,6 @@ def send_fb_message(recipient_id, message_text):
     }
 
     encoded_payload = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-    print(f"--- Debug: Payload size: {len(encoded_payload)} bytes ---")
-    print(f"--- Debug: Message length: {len(message_text)} chars ---")
-    print(f"--- Debug: Message text: {message_text} ---")
 
     headers = {
         "Content-Type": "application/json; charset=utf-8"
@@ -35,6 +37,17 @@ def send_fb_message(recipient_id, message_text):
     except Exception as e:
         print(f"Error sending message to Facebook: {e}")
         return None
+    
+def is_paused(sender_id: str) -> bool:
+    """Returns True if the bot should stay silent for this user."""
+    expiry = paused_users.get(sender_id)
+    if expiry is None:
+        return False
+    if time.time() > expiry:
+        del paused_users[sender_id]  # Unpause after duration
+        return False
+    return True
+
 
 @app.get("/webhook")
 async def verify(request: Request):
@@ -43,7 +56,6 @@ async def verify(request: Request):
     if params.get("hub.verify_token") == VERIFY_TOKEN:
         return int(params.get("hub.challenge"))
     raise HTTPException(status_code=403, detail="Verification token mismatch")
-
 
 @app.post("/webhook")
 async def handle_messages(request: Request):
