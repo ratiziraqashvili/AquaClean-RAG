@@ -6,6 +6,7 @@ import json
 import time
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = FastAPI()
 processed_messages = set()  # To track processed message IDs and avoid duplicates
@@ -37,20 +38,38 @@ def notify_admin_via_email(sender_id, page_id):
     username = get_fb_username(sender_id)
     inbox_url = f"https://business.facebook.com/latest/inbox/all?asset_id={page_id}&selected_item_id={sender_id}"
 
-    body = f"""🔔 ახალი შეტყობინება Aqua Clean-ის ბოტში!
-
-მომხმარებელმა გამოაგზავნა ფოტო და ელოდება ადმინისტრატორის პასუხს.
-
-👤 მომხმარებელი: {username} (ID: {sender_id})
-🔗 გადასვლა ჩატში: {inbox_url}
-
----
-ეს არის ავტომატური შეტყობინება. ბოტი ამ მომხმარებლისთვის დროებით გაჩერებულია.
-    """
-    msg = MIMEText(body)
+    msg = MIMEMultipart("alternative")
     msg['Subject'] = '🔔 ახალი სურათი Aqua Clean-ის ბოტში!'
     msg['From'] = ADMIN_EMAIL
     msg['To'] = ADMIN_EMAIL
+
+    text_body = f"მომხმარებელი: {username}\nჩატში გადასვლა: {inbox_url}"
+
+    html_body = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+          <h2 style="color: #007bff; margin-top: 0;">🔔 ახალი შეტყობინება</h2>
+          <p>მომხმარებელმა <b>{username}</b> გამოაგზავნა ფოტო და ელოდება თქვენს პასუხს.</p>
+          
+          <div style="margin: 30px 0; text-align: center;">
+            <a href="{inbox_url}" 
+               style="background-color: #007bff; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+               ნახვა და პასუხი
+            </a>
+          </div>
+          
+          <hr style="border: 0; border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #888;">
+            ეს არის ავტომატური შეტყობინება Aqua Clean-ის ბოტიდან. მომხმარებელი ამჟამად პაუზაზეა.
+          </p>
+        </div>
+      </body>
+    </html>
+    """
+
+    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
