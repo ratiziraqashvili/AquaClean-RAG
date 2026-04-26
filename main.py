@@ -4,6 +4,8 @@ import requests
 import os
 import json
 import time
+import smtplib
+from email.mime.text import MIMEText
 
 app = FastAPI()
 processed_messages = set()  # To track processed message IDs and avoid duplicates
@@ -14,6 +16,49 @@ PAUSE_DURATION = 1800 # 30 minutes in seconds
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 APP_ID = os.getenv("APP_ID")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+
+def get_fb_username(user_id):
+    url = f"https://graph.facebook.com/{user_id}?fields=first_name,last_name&access_token={PAGE_ACCESS_TOKEN}"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        return f"{data.get("first_name", "")} {data.get("last_name", "")}".strip() or "Unknown User"
+    except Exception as e:
+        print(f"Error fetching Facebook username: {e}")
+        return "Customer"
+
+def notify_admin_via_email(sender_id, page_id):
+    if not ADMIN_EMAIL or not EMAIL_PASSWORD:
+        print("Admin email or password not set. Skipping email notification.")
+        return
+    
+    username = get_fb_username(sender_id)
+    inbox_url = f"https://business.facebook.com/latest/inbox/all?asset_id={page_id}&selected_item_id={sender_id}"
+
+    body = f"""🔔 ახალი შეტყობინება Aqua Clean-ის ბოტში!
+
+მომხმარებელმა გამოაგზავნა ფოტო და ელოდება ადმინისტრატორის პასუხს.
+
+👤 მომხმარებელი: {username} (ID: {sender_id})
+🔗 გადასვლა ჩატში: {inbox_url}
+
+---
+ეს არის ავტომატური შეტყობინება. ბოტი ამ მომხმარებლისთვის დროებით გაჩერებულია.
+    """
+    msg = MIMEText(body)
+    msg['Subject'] = '🔔 ახალი სურათი Aqua Clean-ის ბოტში!'
+    msg['From'] = ADMIN_EMAIL
+    msg['To'] = ADMIN_EMAIL
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(ADMIN_EMAIL, EMAIL_PASSWORD)
+            server.send_message(msg)
+        print(f"Admin notified via email about image from user {sender_id}")
+    except Exception as e:
+        print(f"Error sending email notification: {e}")
 
 def send_fb_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v21.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
@@ -25,9 +70,6 @@ def send_fb_message(recipient_id, message_text):
     }
 
     encoded_payload = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-    print(f"--- Debug: Payload size: {len(encoded_payload)} bytes ---")
-    print(f"--- Debug: Message length: {len(message_text)} chars ---")
-    print(f"--- Debug: Message text: {message_text} ---")
 
     headers = {
         "Content-Type": "application/json; charset=utf-8"
@@ -88,10 +130,7 @@ async def handle_messages(request: Request):
                         elif str(echo_app_id) != str(APP_ID):
                             paused_users[target_user_id] = time.time()
                             print(f"--- Human admin intervened. Pausing bot for user {target_user_id} ---")
-
                         continue
-
-                    user_text = message_data.get("text", "")
 
                     if sender_id in paused_users:
                         time_since_pause = time.time() - paused_users[sender_id]
@@ -101,6 +140,29 @@ async def handle_messages(request: Request):
                         else:
                             del paused_users[sender_id]
                             print(f"--- Pause expired. Resuming bot for user {sender_id} ---")
+
+                    
+                    attachments = message_data.get("attachments", [])
+                    is_image = False
+
+                    for att in attachments:
+                        if att.get("type") == "image":
+                            is_image = True
+                            break
+
+                    if is_image:
+                        print(f"--- Image received from {sender_id}. Pausing bot and notifying admin. ---")
+                        paused_users[sender_id] = time.time()
+
+                        notify_admin_via_email(sender_id, recipient_id)
+
+                        send_fb_message(sender_id, "თქვენი სურათი მიღებულია. ჩვენი ადმინისტრატორი მალე დაგიკავშირდებათ.")
+                        continue
+
+                    user_text = message_data.get("text", "")
+
+                    if not user_text:
+                        continue
 
                     try:
                         print(f"User sent: {user_text}")
