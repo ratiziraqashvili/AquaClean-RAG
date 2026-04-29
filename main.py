@@ -7,10 +7,11 @@ import time
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from collections import defaultdict
+from collections import defaultdict, deque
 
 app = FastAPI()
 processed_messages = set()  # To track processed message IDs and avoid duplicates
+processed_messages_order = deque(maxlen=1000) # To maintain the order of processed messages for cleanup
 
 paused_users = {}
 user_message_timestamps = defaultdict(list)
@@ -159,9 +160,12 @@ async def handle_messages(request: Request):
                     recipient_id = messaging_event["recipient"]["id"]
 
                     if msg_id:
-                        processed_messages.add(msg_id)
-                        if len(processed_messages) > 1000:
-                            processed_messages.pop()  # Remove the oldest message ID to prevent memory bloat
+                        if msg_id not in processed_messages:
+                            processed_messages.add(msg_id)
+                            processed_messages_order.append(msg_id)
+                            if len(processed_messages) > 1000:
+                                oldest = processed_messages_order[0]
+                                processed_messages.discard(oldest)
                     
                     if message_data.get("is_echo"):
                         target_user_id = recipient_id
