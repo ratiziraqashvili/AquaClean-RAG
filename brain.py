@@ -61,9 +61,26 @@ def search_page_info(query_input):
     docs = RETRIEVER.invoke(final_query)
     return "\n\n".join([d.page_content for d in docs])
 
-
 # Brain
 def get_ai_answer(user_input: str) -> str:
+    # Sanitize
+    user_input = user_input.strip()
+
+    if not user_input:
+        return "გთხოვთ, ჩაწერეთ თქვენი კითხვა. 💙"
+    
+    suspicious_words = [ 
+        "ignore previous instructions",
+        "forget your instructions", 
+        "you are now",
+        "act as",
+        "system prompt"
+        ]
+    lower_input = user_input.lower()
+    if any(p in lower_input for p in suspicious_words):
+        print(f"Potential prompt injection attempt: {user_input}")
+        return "ბოდიში, ამ შეტყობინებაზე პასუხის გაცემა არ შემიძლია. 💙"
+
     try:
         docs = RETRIEVER.invoke(user_input)
         context = "\n\n".join([d.page_content for d in docs])
