@@ -7,11 +7,14 @@ import time
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from collections import defaultdict
 
 app = FastAPI()
 processed_messages = set()  # To track processed message IDs and avoid duplicates
 
 paused_users = {}
+user_message_timestamps = defaultdict(list)
+rate_limited_users = {}
 PAUSE_DURATION = 1800 # 30 minutes in seconds
 
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
@@ -19,6 +22,30 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 APP_ID = os.getenv("APP_ID")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+
+RATE_LIMIT_MESSAGES = 10
+RATE_LIMIT_COOLDOWN = 500
+RATE_LIMIT_WINDOW = 60
+
+def is_rate_limited(user_id: str) -> bool:
+    now = time.time()
+
+    if user_id in rate_limited_users:
+        if now < rate_limited_users[user_id]:
+            return True
+        else:
+            del rate_limited_users[user_id]
+
+    timestamps = user_message_timestamps[user_id]
+    user_message_timestamps[user_id] = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
+
+    if len(user_message_timestamps[user_id]) >= RATE_LIMIT_MESSAGES:
+        rate_limited_users[user_id] = now + RATE_LIMIT_COOLDOWN
+        print(f"Rate limit triggered for user {user_id}. Cooldown until {time.ctime(rate_limited_users[user_id])}")
+        return True
+    
+    user_message_timestamps[user_id].append(now)
+    return False
 
 def get_fb_username(user_id):
     url = f"https://graph.facebook.com/{user_id}?fields=first_name,last_name&access_token={PAGE_ACCESS_TOKEN}"
@@ -185,6 +212,10 @@ async def handle_messages(request: Request):
 
                     try:
                         print(f"User sent: {user_text}")
+
+                        if is_rate_limited(sender_id):
+                            send_fb_message(sender_id, "თქვენ ძალიან ხშირად გვიგზავნით შეტყობინებებს. გთხოვთ, ცოტა ხნით შეაჩეროთ და მოგვიანებით სცადოთ.")
+                            continue
                         ai_response = get_ai_answer(user_text)
                     except Exception as e:
                         print(f"AI Error: {e}")
