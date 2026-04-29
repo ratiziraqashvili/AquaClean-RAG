@@ -69,15 +69,42 @@ def get_ai_answer(user_input: str) -> str:
     if not user_input:
         return "გთხოვთ, ჩაწერეთ თქვენი კითხვა. 💙"
     
-    suspicious_words = [ 
-        "ignore previous instructions",
-        "forget your instructions", 
-        "you are now",
-        "act as",
-        "system prompt"
-        ]
+    suspicious_patterns = [
+    # English (keep these - tech-savvy users might try English)
+    "ignore previous instructions",
+    "forget your instructions",
+    "you are now",
+    "act as",
+    "system prompt",
+    "jailbreak",
+    "dan mode",
+    "developer mode",
+
+    # Georgian direct instruction overrides
+    "დაივიწყე ინსტრუქციები",
+    "დაივიწყე წინა",
+    "შეცვალე შენი",
+    "შენ ახლა ხარ",
+    "იყავი",
+    "გახდი",
+    "ითამაშე",
+    "მოიქეცი როგორც",
+    "წარმოიდგინე რომ",
+    "სისტემის პრომპტი",
+    "სისტემური პრომპტი",
+    "ინსტრუქცია",
+    "პრომპტი",
+
+    # Role manipulation
+    "შენ ხარ სხვა",
+    "შენ არ ხარ ბოტი",
+    "შენ ხარ ადამიანი",
+    "გამოავლინე",
+    "მომეცი წვდომა",
+]
+    
     lower_input = user_input.lower()
-    if any(p in lower_input for p in suspicious_words):
+    if any(p in lower_input for p in suspicious_patterns):
         print(f"Potential prompt injection attempt: {user_input}")
         return "ბოდიში, ამ შეტყობინებაზე პასუხის გაცემა არ შემიძლია. 💙"
 
