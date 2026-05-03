@@ -5,11 +5,10 @@ from langchain_chroma import Chroma
 from langchain_community.document_loaders import TextLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.tools import tool
-from groq import Groq
+from google import genai
+from google.genai import types
 
 load_dotenv()
-
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 SYSTEM_PROMPT = """შენ ხარ Aqua Clean-ის მხარდაჭერის ასისტენტი მესენჯერში.
 პასუხები გაეცი მხოლოდ მოწოდებული კონტექსტიდან.
@@ -23,6 +22,8 @@ SYSTEM_PROMPT = """შენ ხარ Aqua Clean-ის მხარდაჭ�
 - არ გამოიყენო სიები ან bullet points.
 - არ გაიმეოროო კითხვა და არ დაწეროო შესავალი.
 - პირდაპირ უპასუხე კითხვას."""
+
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Knowledge Base
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -112,16 +113,15 @@ def get_ai_answer(user_input: str) -> str:
         docs = RETRIEVER.invoke(user_input)
         context = "\n\n".join([d.page_content for d in docs])
 
-        response = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            max_tokens=500,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"კონტექსტი:\n{context}\n\nკითხვა: {user_input}"}
-            ]
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=f"კონტექსტი:\n{context}\n\nკითხვა: {user_input}",
+            config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=500
+            )
         )
-
-        return response.choices[0].message.content.strip()
+        return response.text.strip()
     except Exception as e:
         print(f"Error in get_ai_answer: {e}")
         return "ბოდიში, ამჟამად ტექნიკური პრობლემაა. გთხოვთ, მოგვიანებით სცადოთ. 💙"
