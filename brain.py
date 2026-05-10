@@ -118,7 +118,7 @@ def get_ai_answer(user_input: str) -> str:
             contents=f"კონტექსტი:\n{context}\n\nკითხვა: {user_input}",
             config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
-            max_output_tokens=500
+            max_output_tokens=1000
             )
         )
         return response.text.strip()

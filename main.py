@@ -8,10 +8,15 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from collections import defaultdict, deque
+import asyncio
 
 app = FastAPI()
 processed_messages = set()  # To track processed message IDs and avoid duplicates
 processed_messages_order = deque(maxlen=1000) # To maintain the order of processed messages for cleanup
+
+user_buffers = defaultdict(list)
+user_timer_tasks = {}
+BUFFER_WAIT_TIME = 6.0 # seconds
 
 paused_users = {}
 user_message_timestamps = defaultdict(list)
@@ -27,6 +32,38 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 RATE_LIMIT_MESSAGES = 10
 RATE_LIMIT_COOLDOWN = 500
 RATE_LIMIT_WINDOW = 60
+
+async def process_combined_messages(sender_id: str):
+    try:
+        await asyncio.sleep(BUFFER_WAIT_TIME)
+    except asyncio.CancelledError:
+        print(f"Timer reset for user {sender_id} (new message received)")
+        raise
+
+    if not user_buffers.get(sender_id):
+        return
+
+    messages_to_process = list(user_buffers[sender_id])
+    combined_text = "\n".join(messages_to_process)
+    user_buffers[sender_id].clear()
+
+    if sender_id in user_timer_tasks:
+        del user_timer_tasks[sender_id]
+
+    print(f"Processing combined message for {sender_id}:\n{combined_text}")
+
+    try:
+        ai_response = await asyncio.to_thread(get_ai_answer, combined_text)
+        await asyncio.to_thread(send_fb_message, sender_id, ai_response)
+        print(f"Sent AI response to {sender_id}: {ai_response}")
+    except Exception as e:
+        print(f"Error processing combined message: {e}")
+        await asyncio.to_thread(send_fb_message, sender_id, "ბოდიში, ამჟამად ტექნიკური პრობლემაა. 💙")
+
+    # If new messages arrived while we were processing, schedule a fresh task for them
+    if user_buffers.get(sender_id) and sender_id not in user_timer_tasks:
+        print(f"New messages arrived during processing for {sender_id}, scheduling follow-up task")
+        user_timer_tasks[sender_id] = asyncio.create_task(process_combined_messages(sender_id))
 
 def is_rate_limited(user_id: str) -> bool:
     now = time.time()
@@ -214,18 +251,17 @@ async def handle_messages(request: Request):
                     if not user_text:
                         continue
 
-                    try:
-                        print(f"User sent: {user_text}")
+                    print(f"User fragment received: {user_text}")
 
-                        if is_rate_limited(sender_id):
-                            send_fb_message(sender_id, "თქვენ ძალიან ხშირად გვიგზავნით შეტყობინებებს. გთხოვთ, ცოტა ხნით შეაჩეროთ და მოგვიანებით სცადოთ.")
-                            continue
-                        ai_response = get_ai_answer(user_text)
-                    except Exception as e:
-                        print(f"AI Error: {e}")
-                        ai_response = "ბოდიში, ამჟამად ტექნიკური პრობლემაა. გთხოვთ, მოგვიანებით სცადოთ."
-                    
-                    send_fb_message(sender_id, ai_response)
-                    print(f"Sent AI response to {sender_id} : {ai_response}")
+                    if is_rate_limited(sender_id):
+                        await asyncio.to_thread(send_fb_message, sender_id, "თქვენ ძალიან ხშირად გვიგზავნით შეტყობინებებს. გთხოვთ, ცოტა ხნით შეაჩეროთ და მოგვიანებით სცადოთ.")
+                        continue
+
+                    user_buffers[sender_id].append(user_text)
+
+                    if sender_id in user_timer_tasks and not user_timer_tasks[sender_id].done():
+                        user_timer_tasks[sender_id].cancel()
+
+                    user_timer_tasks[sender_id] = asyncio.create_task(process_combined_messages(sender_id))
 
     return {"status": "success"}
