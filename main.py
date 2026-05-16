@@ -16,7 +16,7 @@ processed_messages_order = deque(maxlen=1000) # To maintain the order of process
 
 user_buffers = defaultdict(list)
 user_timer_tasks = {}
-BUFFER_WAIT_TIME = 6.0 # seconds
+BUFFER_WAIT_TIME = 3.0 # seconds
 
 paused_users = {}
 user_message_timestamps = defaultdict(list)
